@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://0.peerjs.com wss://0.peerjs.com; media-src 'self' blob:; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark light">
+<title>Conversa local</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<section id="inicio">
+  <h1>Conversa local</h1>
+  <p class="descricao">Conversa por voz entre dois celulares conectados à mesma rede Wi-Fi. A voz vai direto de um celular ao outro, sem passar pela internet. A internet é usada somente para localizar o outro celular ao entrar na sala.</p>
+
+  <p id="aviso" class="aviso" role="alert" hidden></p>
+
+  <div id="opcoes" class="opcoes">
+    <div id="blocoCriar" class="bloco">
+      <button id="criar" class="principal" type="button">Criar sala</button>
+    </div>
+    <div id="blocoEntrar" class="bloco">
+      <label for="campoCodigo">Código da sala</label>
+      <input id="campoCodigo" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="xxxxx-xxxxx">
+      <button id="entrar" type="button">Entrar na sala</button>
+    </div>
+  </div>
+
+  <details class="roteiro">
+    <summary>Roteiro do teste</summary>
+    <ol>
+      <li>Conecte cada fone de capacete ao celular correspondente.</li>
+      <li>No Android, ative o roteador Wi-Fi com os dados móveis ligados.</li>
+      <li>No iPhone, desative os dados móveis e conecte ao Wi-Fi do Android.</li>
+      <li>No Android, toque em "Criar sala" e envie o link ao iPhone.</li>
+      <li>No iPhone, abra o link e toque em "Entrar na sala".</li>
+      <li>Com os capacetes, confira se a voz sai e chega pelos fones.</li>
+      <li>No Android, desative os dados móveis e mantenha o roteador ligado. Continue a conversa por 2 minutos.</li>
+      <li>No Android, apague a tela por 1 minuto e continue a conversa.</li>
+      <li>No iPhone, bloqueie a tela por 30 segundos e depois desbloqueie.</li>
+      <li>Reative os dados móveis do Android. Nos dois celulares, toque em "Copiar registro" e envie o texto.</li>
+    </ol>
+  </details>
+</section>
+
+<section id="conversa" hidden>
+  <p id="status" class="status espera" role="status">Conectando</p>
+
+  <div id="convite" class="bloco" hidden>
+    <p class="rotulo">Código da sala</p>
+    <p id="codigoSala" class="codigo"></p>
+    <div class="linha">
+      <button id="enviarLink" type="button">Enviar link</button>
+      <button id="copiarLink" type="button">Copiar link</button>
+    </div>
+  </div>
+
+  <div class="linha">
+    <button id="silenciar" type="button" aria-pressed="false">Silenciar microfone</button>
+    <button id="travar" type="button">Travar tela</button>
+  </div>
+  <button id="ativarAudio" class="principal" type="button" hidden>Ativar áudio</button>
+  <button id="entrarNovamente" class="principal" type="button" hidden>Entrar novamente</button>
+  <button id="voltar" type="button" hidden>Voltar ao início</button>
+  <p id="nota" class="nota" aria-live="polite"></p>
+
+  <section class="painel">
+    <h2>Diagnóstico</h2>
+    <dl>
+      <dt>Rede</dt>
+      <dd id="rede">Sem conexão</dd>
+      <dt>Endereços</dt>
+      <dd id="enderecos">Nenhum</dd>
+      <dt>Microfone em uso</dt>
+      <dd id="micAtual">Nenhum</dd>
+      <dt>Áudio enviado</dt>
+      <dd><div class="medidor"><div id="nivelEnviado"></div></div><span id="infoEnviado">Sem dados</span></dd>
+      <dt>Áudio recebido</dt>
+      <dd><div class="medidor"><div id="nivelRecebido"></div></div><span id="infoRecebido">Sem dados</span></dd>
+      <dt>Tela ligada</dt>
+      <dd id="telaLigada">Desativada</dd>
+    </dl>
+    <label for="microfone">Microfone</label>
+    <select id="microfone"></select>
+    <button id="reativar" type="button">Reativar microfone</button>
+  </section>
+
+  <section class="painel">
+    <h2>Registro</h2>
+    <button id="copiarRegistro" type="button">Copiar registro</button>
+    <textarea id="areaCopia" readonly hidden></textarea>
+    <ol id="listaRegistro" class="registro"></ol>
+  </section>
+
+  <button id="encerrar" class="perigo" type="button">Encerrar</button>
+</section>
+
+</main>
+
+<div id="trava" class="trava" hidden>
+  <p>Tela travada</p>
+  <button id="destravar" type="button"><span class="progresso"></span><span class="texto">Manter pressionado para destravar</span></button>
+</div>
+
+<audio id="audioRemoto" autoplay playsinline></audio>
+<script src="vendor/peerjs.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
