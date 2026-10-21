@@ -155,10 +155,20 @@ textarea {
 }
 .registro li { padding: 5px 0; border-bottom: 1px solid var(--borda); }
 
-.roteiro { margin-top: 24px; }
-.roteiro summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
-.roteiro ol { padding-left: 22px; margin: 8px 0 0; }
-.roteiro li { margin-bottom: 8px; }
+.passos { margin-bottom: 16px; }
+.passos h2 { margin: 0; }
+.passos ol { padding-left: 22px; margin: 0; }
+.passos li { margin-bottom: 8px; }
+.observacao { margin: 0; color: var(--texto-fraco); font-size: 0.9rem; }
+
+.detalhes { margin-top: 24px; }
+.detalhes summary {
+  cursor: pointer;
+  color: var(--texto-fraco);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+}
 
 .trava {
   position: fixed;

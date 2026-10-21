@@ -85,6 +85,9 @@ let leiturasParadas = 0;
 let semAudioAvisado = false;
 const eventos = [];
 
+const AVISO_PERDIDA = 'Conexão perdida. Confira se o roteador Wi-Fi continua ligado e se os dois celulares estão no mesmo Wi-Fi.';
+const AVISO_SEM_INTERNET = 'Sem internet para encontrar o outro celular. Ligue os dados móveis do celular que tem o roteador Wi-Fi.';
+
 const NOMES_ICE = {
   new: 'nova',
   checking: 'verificando',
@@ -376,7 +379,7 @@ function tratarErro(erro) {
   }
   if (semInternet.includes(tipo)) {
     if (!chamada && !servidorConectado) {
-      definirStatus('Sem conexão com o servidor de encontro. Verifique a internet. Nova tentativa a cada 15 segundos.', 'alerta');
+      definirStatus(AVISO_SEM_INTERNET + ' Nova tentativa a cada 15 segundos.', 'alerta');
     }
     agendarReconexao();
     return;
@@ -412,7 +415,7 @@ function chamar() {
   clearTimeout(timerConexao);
   timerConexao = setTimeout(() => {
     if (!conectado()) {
-      definirStatus('A conexão não foi concluída. Os dois celulares precisam estar na mesma rede Wi-Fi.', 'alerta');
+      definirStatus('A conexão não foi concluída. Confira se os dois celulares estão no mesmo Wi-Fi: o roteador de um ligado e o outro conectado nele.', 'alerta');
       registrar('A conexão não foi concluída em 20 segundos.');
       $('entrarNovamente').hidden = false;
     }
@@ -448,7 +451,7 @@ function configurarChamada(nova) {
       if (chamada !== nova) return;
       if (pc.connectionState === 'failed') {
         registrar('Conexão perdida.');
-        definirStatus('Conexão perdida.', 'erro');
+        definirStatus(AVISO_PERDIDA, 'erro');
       }
     });
   }
@@ -471,7 +474,7 @@ function configurarChamada(nova) {
       if (semAudioAvisado) definirStatus('Conectado, mas sem áudio da outra pessoa.', 'alerta');
       else definirStatus('Conversa ativa.', 'ok');
     } else if (estado === 'disconnected') definirStatus('Conexão instável. Tentando recuperar.', 'alerta');
-    else if (estado === 'failed') definirStatus('Conexão perdida.', 'erro');
+    else if (estado === 'failed') definirStatus(AVISO_PERDIDA, 'erro');
   });
 
   nova.on('close', () => {
@@ -763,7 +766,6 @@ function iniciar() {
     }
     copiar(url, 'Link copiado.');
   });
-  $('copiarLink').addEventListener('click', () => copiar(linkDaSala(), 'Link copiado.'));
 
   $('silenciar').addEventListener('click', () => {
     silenciado = !silenciado;
@@ -780,7 +782,7 @@ function iniciar() {
   $('ativarAudio').addEventListener('click', tocarAudio);
   $('entrarNovamente').addEventListener('click', () => {
     if (!peer || peer.destroyed || peer.disconnected) {
-      definirStatus('Sem conexão com o servidor de encontro. Verifique a internet e tente novamente.', 'alerta');
+      definirStatus(AVISO_SEM_INTERNET, 'alerta');
       return;
     }
     $('voltar').hidden = true;
@@ -801,7 +803,18 @@ function iniciar() {
     trocarMicrofone(microfoneEscolhido);
   });
   $('reativar').addEventListener('click', () => trocarMicrofone(microfoneEscolhido || undefined));
-  $('copiarRegistro').addEventListener('click', () => copiar(textoRegistro(), 'Registro copiado.'));
+  $('enviarRegistro').addEventListener('click', async () => {
+    const registro = textoRegistro();
+    if (navigator.share) {
+      try {
+        await navigator.share({ text: registro });
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+      }
+    }
+    copiar(registro, 'Registro copiado. Cole o texto numa conversa do WhatsApp.');
+  });
 
   document.addEventListener('visibilitychange', () => {
     if (!peer) return;
