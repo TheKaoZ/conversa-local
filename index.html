@@ -9,7 +9,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Conversa local</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <main>
@@ -55,6 +55,10 @@
     <button id="silenciar" type="button" aria-pressed="false">Silenciar microfone</button>
     <button id="travar" type="button">Travar tela</button>
   </div>
+  <div class="campo-microfone">
+    <label for="microfone">Microfone</label>
+    <select id="microfone"></select>
+  </div>
   <button id="ativarAudio" class="principal" type="button" hidden>Ativar áudio</button>
   <button id="entrarNovamente" class="principal" type="button" hidden>Entrar novamente</button>
   <button id="voltar" type="button" hidden>Voltar ao início</button>
@@ -82,8 +86,6 @@
         <dt>Tela ligada</dt>
         <dd id="telaLigada">Desativada</dd>
       </dl>
-      <label for="microfone">Microfone</label>
-      <select id="microfone"></select>
       <button id="reativar" type="button">Reativar microfone</button>
     </section>
 
@@ -104,6 +106,6 @@
 
 <audio id="audioRemoto" autoplay playsinline></audio>
 <script src="vendor/peerjs.min.js"></script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

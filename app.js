@@ -180,6 +180,11 @@ function trackAtual() {
 }
 
 function pegarMicrofone(deviceId) {
+  // iOS 17 ou mais novo: avisa o Safari que a página grava e toca ao mesmo tempo, como numa
+  // ligação, para o som sair pelo mesmo caminho da ligação (fone Bluetooth, se conectado).
+  if (navigator.audioSession) {
+    try { navigator.audioSession.type = 'play-and-record'; } catch (e) { /* versão sem suporte */ }
+  }
   // Os três filtros ligados fazem o Android usar o microfone do fone Bluetooth.
   const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
   if (deviceId) audio.deviceId = { exact: deviceId };
@@ -205,6 +210,17 @@ function atualizarMicrofone() {
   $('micAtual').textContent = texto;
 }
 
+// Nomes que o Chrome do Android dá aos microfones, traduzidos. O registro guarda o nome original.
+function nomeDoMicrofone(rotulo, indice) {
+  if (!rotulo) return 'Microfone ' + (indice + 1);
+  if (/bluetooth/i.test(rotulo)) return 'Fone Bluetooth';
+  if (/earpiece/i.test(rotulo)) return 'Celular (modo ligação)';
+  if (/speakerphone/i.test(rotulo)) return 'Celular (viva-voz)';
+  if (/wired/i.test(rotulo)) return 'Fone com fio';
+  if (/^(default|padrão)$/i.test(rotulo.trim())) return 'Padrão do celular';
+  return rotulo;
+}
+
 async function listarMicrofones() {
   const seletor = $('microfone');
   let dispositivos = [];
@@ -219,7 +235,8 @@ async function listarMicrofones() {
   dispositivos.filter((d) => d.kind === 'audioinput').forEach((d, i) => {
     const opcao = document.createElement('option');
     opcao.value = d.deviceId;
-    opcao.textContent = d.label || 'Microfone ' + (i + 1);
+    opcao.textContent = nomeDoMicrofone(d.label, i);
+    opcao.dataset.original = d.label;
     if (d.deviceId === atual) opcao.selected = true;
     seletor.append(opcao);
   });
@@ -614,7 +631,7 @@ async function lerStats() {
 }
 
 function textoRegistro() {
-  const opcoes = [...$('microfone').options].map((o) => o.textContent).join('; ');
+  const opcoes = [...$('microfone').options].map((o) => o.dataset.original || o.textContent).join('; ');
   return [
     'Registro do teste de conversa',
     'Data: ' + new Date().toLocaleString('pt-BR'),
@@ -628,6 +645,7 @@ function textoRegistro() {
     'Áudio enviado: ' + $('infoEnviado').textContent,
     'Áudio recebido: ' + $('infoRecebido').textContent,
     'Tela ligada: ' + $('telaLigada').textContent,
+    'Sessão de áudio: ' + (navigator.audioSession ? navigator.audioSession.type : 'não disponível'),
     '',
     'Eventos:',
     ...eventos,
