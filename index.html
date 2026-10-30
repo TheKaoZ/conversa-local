@@ -9,7 +9,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Conversa local</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <main>
@@ -40,6 +40,10 @@
       <button id="entrar" type="button">Entrar na sala</button>
     </div>
   </div>
+
+  <button id="enviarUltimoRegistro" type="button" hidden>Enviar último registro</button>
+  <p id="notaInicio" class="nota" aria-live="polite"></p>
+  <textarea id="areaCopiaInicio" readonly hidden></textarea>
 </section>
 
 <section id="conversa" hidden>
@@ -58,6 +62,15 @@
   <div class="campo-microfone">
     <label for="microfone">Microfone</label>
     <select id="microfone"></select>
+  </div>
+  <div class="campo-volume">
+    <span class="rotulo">Volume</span>
+    <div class="linha-volume">
+      <button id="volumeMenos" type="button" aria-label="Diminuir volume">−</button>
+      <output id="volumeValor">100%</output>
+      <button id="volumeMais" type="button" aria-label="Aumentar volume">+</button>
+    </div>
+    <p class="observacao">Acima de 100%, a página amplifica a voz recebida. Antes, coloque o volume do celular no máximo pelos botões laterais.</p>
   </div>
   <button id="ativarAudio" class="principal" type="button" hidden>Ativar áudio</button>
   <button id="entrarNovamente" class="principal" type="button" hidden>Entrar novamente</button>
@@ -83,6 +96,8 @@
         <dd><div class="medidor"><div id="nivelEnviado"></div></div><span id="infoEnviado">Sem dados</span></dd>
         <dt>Áudio recebido</dt>
         <dd><div class="medidor"><div id="nivelRecebido"></div></div><span id="infoRecebido">Sem dados</span></dd>
+        <dt>Atraso</dt>
+        <dd id="atraso">Sem dados</dd>
         <dt>Tela ligada</dt>
         <dd id="telaLigada">Desativada</dd>
       </dl>
@@ -106,6 +121,6 @@
 
 <audio id="audioRemoto" autoplay playsinline></audio>
 <script src="vendor/peerjs.min.js"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

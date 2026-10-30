@@ -4,6 +4,12 @@ const PREFIXO = 'cvl-';
 const ALFABETO = '23456789abcdefghjkmnpqrstuvwxyz'; // sem 0, 1, i, l e o, que se confundem
 const TAMANHO_CODIGO = 10;
 const OPCOES_PEER = { config: { iceServers: [] }, debug: 0 };
+const NIVEIS_VOLUME = [100, 150, 200, 250, 300];
+const CHAVE_VOLUME = 'cvl-volume';
+const CHAVE_REGISTRO = 'cvl-registro';
+const CHAVE_REGISTRO_ANTERIOR = 'cvl-registro-anterior';
+const MAX_EVENTOS = 400;
+const LEITURAS_POR_MEDICAO = 30; // uma linha de medição no registro a cada 60 segundos
 
 const $ = (id) => document.getElementById(id);
 const audioRemoto = $('audioRemoto');
@@ -83,6 +89,14 @@ let pacotesAnteriores = -1;
 let ultimoPacoteEm = 0;
 let leiturasParadas = 0;
 let semAudioAvisado = false;
+let tentandoConectar = false;
+let reentrarAoConectar = false;
+let esperaAnterior = null;
+let leituras = 0;
+let volume = lerVolumeSalvo();
+let contextoAudio = null;
+let amplificador = null;
+let gravandoRegistro = false;
 const eventos = [];
 
 const AVISO_PERDIDA = 'Conexão perdida. Confira se o roteador Wi-Fi continua ligado e se os dois celulares estão no mesmo Wi-Fi.';
@@ -118,10 +132,10 @@ function definirStatus(texto, tipo) {
   status.className = 'status ' + tipo;
 }
 
-function mostrarNota(texto) {
-  $('nota').textContent = texto;
+function mostrarNota(texto, id = 'nota') {
+  $(id).textContent = texto;
   clearTimeout(timerNota);
-  timerNota = setTimeout(() => { $('nota').textContent = ''; }, 3000);
+  timerNota = setTimeout(() => { $(id).textContent = ''; }, 3000);
 }
 
 function bloquearBotoes(sim) {
@@ -133,9 +147,47 @@ function registrar(texto) {
   const hora = new Date().toLocaleTimeString('pt-BR', { hour12: false });
   const linha = hora + '  ' + texto;
   eventos.push(linha);
+  if (eventos.length > MAX_EVENTOS) eventos.splice(0, eventos.length - MAX_EVENTOS);
+  const lista = $('listaRegistro');
   const item = document.createElement('li');
   item.textContent = linha;
-  $('listaRegistro').prepend(item);
+  lista.prepend(item);
+  while (lista.children.length > MAX_EVENTOS) lista.lastElementChild.remove();
+  salvarRegistro();
+}
+
+// ---------------------------------------------------------------------------
+// Registro guardado no celular: sobrevive a fechar a página e guarda também a
+// conversa anterior, para ser enviado depois.
+// ---------------------------------------------------------------------------
+function lerSalvo(chave) {
+  try {
+    return localStorage.getItem(chave) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function iniciarRegistroSalvo() {
+  if (gravandoRegistro) return;
+  gravandoRegistro = true;
+  const ultimo = lerSalvo(CHAVE_REGISTRO);
+  try {
+    if (ultimo) localStorage.setItem(CHAVE_REGISTRO_ANTERIOR, ultimo);
+    localStorage.removeItem(CHAVE_REGISTRO);
+  } catch (e) { /* sem espaço ou armazenamento bloqueado: o registro fica só na tela */ }
+}
+
+function salvarRegistro() {
+  if (!gravandoRegistro) return;
+  try {
+    localStorage.setItem(CHAVE_REGISTRO, textoRegistro());
+  } catch (e) { /* idem */ }
+}
+
+function juntarRegistros(atual, anterior) {
+  if (!anterior) return atual;
+  return atual + '\n\n--- Conversa anterior ---\n' + anterior;
 }
 
 function falhar(texto) {
@@ -179,12 +231,16 @@ function trackAtual() {
   return streamLocal ? streamLocal.getAudioTracks()[0] : null;
 }
 
-function pegarMicrofone(deviceId) {
+function pedirModoLigacao() {
   // iOS 17 ou mais novo: avisa o Safari que a página grava e toca ao mesmo tempo, como numa
   // ligação, para o som sair pelo mesmo caminho da ligação (fone Bluetooth, se conectado).
   if (navigator.audioSession) {
     try { navigator.audioSession.type = 'play-and-record'; } catch (e) { /* versão sem suporte */ }
   }
+}
+
+function pegarMicrofone(deviceId) {
+  pedirModoLigacao();
   // Os três filtros ligados fazem o Android usar o microfone do fone Bluetooth.
   const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
   if (deviceId) audio.deviceId = { exact: deviceId };
@@ -308,6 +364,115 @@ async function conferirMicrofone() {
 }
 
 // ---------------------------------------------------------------------------
+// Volume da voz recebida. Até 100%, o som sai direto pelo elemento de áudio,
+// que segue o volume do celular (o iPhone não deixa a página mudar esse volume).
+// Acima de 100%, a voz passa por um amplificador do Web Audio com limitador,
+// para não distorcer, e o elemento fica mudo para o som não sair duas vezes.
+// ---------------------------------------------------------------------------
+function lerVolumeSalvo() {
+  const salvo = parseInt(lerSalvo(CHAVE_VOLUME), 10);
+  return NIVEIS_VOLUME.includes(salvo) ? salvo : 100;
+}
+
+// Precisa ser chamado num toque: fora dele, o iPhone deixa o Web Audio parado.
+function prepararContextoAudio() {
+  const Contexto = window.AudioContext || window.webkitAudioContext;
+  if (!Contexto) return null;
+  if (!contextoAudio) {
+    try {
+      contextoAudio = new Contexto();
+    } catch (e) {
+      registrar('Não foi possível preparar o amplificador: ' + (e.name || e));
+      return null;
+    }
+    contextoAudio.addEventListener('statechange', () => {
+      registrar('Amplificador ' + nomeEstadoAmplificador() + '.');
+      atualizarSaidaDeAudio();
+    });
+  }
+  if (contextoAudio.state !== 'running') contextoAudio.resume().catch(() => {});
+  return contextoAudio;
+}
+
+function nomeEstadoAmplificador() {
+  const nomes = { running: 'ativo', suspended: 'parado', interrupted: 'interrompido pelo sistema', closed: 'desligado' };
+  return contextoAudio ? nomes[contextoAudio.state] || contextoAudio.state : 'desligado';
+}
+
+function montarAmplificador(stream) {
+  if (amplificador && amplificador.stream === stream) return true;
+  desmontarAmplificador();
+  const ctx = prepararContextoAudio();
+  if (!ctx) return false;
+  try {
+    const fonte = ctx.createMediaStreamSource(stream);
+    const ganho = ctx.createGain();
+    const limitador = ctx.createDynamicsCompressor();
+    limitador.threshold.value = -3;
+    limitador.knee.value = 0;
+    limitador.ratio.value = 20;
+    limitador.attack.value = 0.003;
+    limitador.release.value = 0.25;
+    fonte.connect(ganho);
+    ganho.connect(limitador);
+    limitador.connect(ctx.destination);
+    amplificador = { stream, fonte, ganho, limitador };
+    return true;
+  } catch (e) {
+    registrar('Não foi possível amplificar o volume: ' + (e.name || e));
+    return false;
+  }
+}
+
+function desmontarAmplificador() {
+  if (!amplificador) return;
+  try {
+    amplificador.fonte.disconnect();
+    amplificador.limitador.disconnect();
+  } catch (e) { /* já desconectado */ }
+  amplificador = null;
+}
+
+// Se o amplificador parar (sem toque, tela apagada, ligação), a voz volta a sair
+// direto, no volume normal, em vez de sumir.
+function atualizarSaidaDeAudio() {
+  audioRemoto.muted = !!amplificador && !!contextoAudio && contextoAudio.state === 'running';
+}
+
+function aplicarVolume() {
+  $('volumeValor').textContent = volume + '%';
+  $('volumeMenos').disabled = volume <= NIVEIS_VOLUME[0];
+  $('volumeMais').disabled = volume >= NIVEIS_VOLUME[NIVEIS_VOLUME.length - 1];
+  const remoto = audioRemoto.srcObject;
+  if (volume > 100 && remoto && montarAmplificador(remoto)) {
+    amplificador.ganho.gain.value = volume / 100;
+  } else {
+    desmontarAmplificador();
+  }
+  atualizarSaidaDeAudio();
+}
+
+function mudarVolume(passo) {
+  const atual = NIVEIS_VOLUME.indexOf(volume);
+  const novo = NIVEIS_VOLUME[Math.max(0, Math.min(NIVEIS_VOLUME.length - 1, atual + passo))];
+  if (novo === volume) return;
+  volume = novo;
+  try { localStorage.setItem(CHAVE_VOLUME, String(volume)); } catch (e) { /* vale só nesta conversa */ }
+  if (volume > 100) prepararContextoAudio();
+  aplicarVolume();
+  registrar('Volume: ' + volume + '%.');
+}
+
+function descreverVolume() {
+  if (volume <= 100) return '100% (volume do celular)';
+  if (!amplificador) return volume + '% (amplificador aguardando a voz da outra pessoa)';
+  let texto = volume + '% (amplificador ' + nomeEstadoAmplificador();
+  const latencia = contextoAudio && (contextoAudio.outputLatency || contextoAudio.baseLatency);
+  if (latencia) texto += ', atraso de saída ' + Math.round(latencia * 1000) + ' ms';
+  return texto + ')';
+}
+
+// ---------------------------------------------------------------------------
 // Tela sempre ligada
 // ---------------------------------------------------------------------------
 async function manterTelaLigada() {
@@ -345,6 +510,9 @@ function ligarEventosPeer() {
     } else if (!jaChamou) {
       jaChamou = true;
       chamar();
+    } else if (reentrarAoConectar) {
+      reentrarAoConectar = false;
+      if (!conectado()) chamar();
     }
   });
 
@@ -371,6 +539,29 @@ function agendarReconexao() {
   }, 15000);
 }
 
+function reconectarServidorAgora() {
+  if (!peer || peer.destroyed || !peer.disconnected) return;
+  registrar('Reconectando ao servidor de encontro.');
+  try { peer.reconnect(); } catch (e) { /* o ciclo de 15 segundos tenta de novo */ }
+  agendarReconexao();
+}
+
+// Quando o celular de quem entrou volta da tela bloqueada ou de outro app, a conversa
+// pode ter caído. A página entra de novo sozinha; se faltar internet para o encontro,
+// entra assim que o servidor responder.
+function reentrarSePerdeu() {
+  if (papel !== 'convidado' || !jaChamou || !peer || peer.destroyed) return;
+  if (conectado() || tentandoConectar) return;
+  registrar('A conversa foi interrompida enquanto a página estava fechada. Entrando novamente na sala.');
+  // Pedido feito antes de o servidor responder se perde: espera o "open".
+  if (!peer.open) {
+    reentrarAoConectar = true;
+    reconectarServidorAgora();
+    return;
+  }
+  chamar();
+}
+
 function tratarErro(erro) {
   const tipo = (erro && erro.type) || '';
   const fatais = {
@@ -387,6 +578,7 @@ function tratarErro(erro) {
       definirStatus(fatais[tipo], 'erro');
       registrar(fatais[tipo]);
       clearTimeout(timerConexao);
+      tentandoConectar = false;
       $('entrarNovamente').hidden = false;
       $('voltar').hidden = false;
       return;
@@ -419,6 +611,7 @@ function recebendoAudio() {
 }
 
 function chamar() {
+  reentrarAoConectar = false;
   $('entrarNovamente').hidden = true;
   definirStatus('Conectando ao outro celular.', 'espera');
   const antiga = chamada;
@@ -429,8 +622,10 @@ function chamar() {
   }
   configurarChamada(nova);
   if (antiga) antiga.close();
+  tentandoConectar = true;
   clearTimeout(timerConexao);
   timerConexao = setTimeout(() => {
+    tentandoConectar = false;
     if (!conectado()) {
       definirStatus('A conexão não foi concluída. Confira se os dois celulares estão no mesmo Wi-Fi: o roteador de um ligado e o outro conectado nele.', 'alerta');
       registrar('A conexão não foi concluída em 20 segundos.');
@@ -441,8 +636,9 @@ function chamar() {
 
 function receberChamada(recebida) {
   // Com a conversa ativa, ninguém mais entra. Se a conexão atual caiu (por exemplo,
-  // a outra pessoa recarregou a página), a nova entrada substitui a antiga.
-  if (chamada && recebendoAudio()) {
+  // a outra pessoa recarregou a página), a nova entrada substitui a antiga. A mesma
+  // pessoa voltando (mesmo identificador, depois de bloquear a tela) entra sempre.
+  if (chamada && recebendoAudio() && recebida.peer !== chamada.peer) {
     registrar('Pedido de entrada recusado: a sala já está em uso.');
     recebida.close();
     return;
@@ -461,6 +657,7 @@ function configurarChamada(nova) {
   ultimoPacoteEm = 0;
   leiturasParadas = 0;
   semAudioAvisado = false;
+  esperaAnterior = null;
 
   const pc = nova.peerConnection;
   if (pc) {
@@ -476,8 +673,10 @@ function configurarChamada(nova) {
   nova.on('stream', (remoto) => {
     if (chamada !== nova) return;
     clearTimeout(timerConexao);
+    tentandoConectar = false;
     audioRemoto.srcObject = remoto;
     tocarAudio();
+    aplicarVolume();
     $('convite').hidden = true;
     $('entrarNovamente').hidden = true;
     registrar('Conversa conectada.');
@@ -497,6 +696,8 @@ function configurarChamada(nova) {
   nova.on('close', () => {
     if (chamada !== nova) return;
     chamada = null;
+    tentandoConectar = false;
+    clearTimeout(timerConexao);
     registrar('Conversa encerrada.');
     if (papel === 'anfitriao') {
       definirStatus('Conversa encerrada. Aguardando a outra pessoa entrar novamente.', 'alerta');
@@ -567,11 +768,35 @@ function acompanharRecebimento(recebidos) {
   pacotesAnteriores = recebidos;
 }
 
+// Atraso medido: o tempo de ida e volta na rede e quanto a voz espera no buffer
+// antes de tocar. O atraso do fone Bluetooth não aparece aqui.
+function descreverAtraso(par, entrada) {
+  const partes = [];
+  if (par && typeof par.currentRoundTripTime === 'number') {
+    partes.push('Rede ' + Math.round(par.currentRoundTripTime * 1000) + ' ms ida e volta');
+  }
+  if (entrada && typeof entrada.jitterBufferDelay === 'number' && entrada.jitterBufferEmittedCount > 0) {
+    const total = entrada.jitterBufferDelay;
+    const emitidos = entrada.jitterBufferEmittedCount;
+    const media = Math.round((total / emitidos) * 1000);
+    let recente = media;
+    if (esperaAnterior && emitidos > esperaAnterior.emitidos) {
+      recente = Math.round(((total - esperaAnterior.total) / (emitidos - esperaAnterior.emitidos)) * 1000);
+    }
+    esperaAnterior = { total, emitidos };
+    partes.push('espera para tocar ' + recente + ' ms (média ' + media + ' ms)');
+  }
+  return partes.length ? partes.join(', ') : 'Sem dados';
+}
+
 async function lerStats() {
+  leituras++;
+  if (leituras % 5 === 0) salvarRegistro();
   $('enderecos').textContent = contagem.locais + ' locais enviados (' + contagem.ocultos + ' com nome oculto), ' + contagem.bloqueados + ' externos bloqueados';
   const pc = chamada && chamada.peerConnection;
   if (!pc) {
     $('rede').textContent = 'Sem conexão';
+    $('atraso').textContent = 'Sem dados';
     mostrarNivel('nivelEnviado', null);
     mostrarNivel('nivelRecebido', null);
     return;
@@ -618,6 +843,9 @@ async function lerStats() {
   const enviados = saida ? saida.packetsSent || 0 : 0;
   $('infoEnviado').textContent = enviados + ' pacotes' + (fonte && typeof fonte.audioLevel !== 'number' ? ', nível não informado' : '');
 
+  const atraso = descreverAtraso(par, entrada);
+  $('atraso').textContent = atraso;
+
   if (entrada) {
     const recebidos = entrada.packetsReceived || 0;
     const perdidos = Math.max(0, entrada.packetsLost || 0);
@@ -625,6 +853,9 @@ async function lerStats() {
     const parado = pacotesAnteriores >= 0 && recebidos === pacotesAnteriores;
     acompanharRecebimento(recebidos);
     $('infoRecebido').textContent = recebidos + ' pacotes, perda de ' + perda + '%' + (parado ? ', recebimento parado' : '');
+    if (leituras % LEITURAS_POR_MEDICAO === 0 && conectado()) {
+      registrar('Medição: ' + atraso + ', perda de ' + perda + '%, volume ' + volume + '%.');
+    }
   } else {
     $('infoRecebido').textContent = 'Sem dados';
   }
@@ -644,6 +875,8 @@ function textoRegistro() {
     'Microfones disponíveis: ' + (opcoes || 'nenhum'),
     'Áudio enviado: ' + $('infoEnviado').textContent,
     'Áudio recebido: ' + $('infoRecebido').textContent,
+    'Atraso: ' + $('atraso').textContent,
+    'Volume: ' + descreverVolume(),
     'Tela ligada: ' + $('telaLigada').textContent,
     'Sessão de áudio: ' + (navigator.audioSession ? navigator.audioSession.type : 'não disponível'),
     '',
@@ -652,28 +885,50 @@ function textoRegistro() {
   ].join('\n');
 }
 
-async function copiar(texto, confirmacao) {
+// naInicial: a nota e a caixa de cópia da tela inicial, para o registro salvo.
+async function copiar(texto, confirmacao, naInicial) {
+  const idNota = naInicial ? 'notaInicio' : 'nota';
   try {
     await navigator.clipboard.writeText(texto);
-    mostrarNota(confirmacao);
+    mostrarNota(confirmacao, idNota);
   } catch (e) {
-    const area = $('areaCopia');
+    const area = $(naInicial ? 'areaCopiaInicio' : 'areaCopia');
     area.value = texto;
     area.hidden = false;
     area.focus();
     area.select();
-    mostrarNota('Não foi possível copiar automaticamente. Selecione o texto abaixo e copie.');
+    mostrarNota('Não foi possível copiar automaticamente. Selecione o texto abaixo e copie.', idNota);
   }
+}
+
+async function compartilharRegistro(texto, naInicial) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ text: texto });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  copiar(texto, 'Registro copiado. Cole o texto numa conversa do WhatsApp.', naInicial);
 }
 
 // ---------------------------------------------------------------------------
 // Entrada
 // ---------------------------------------------------------------------------
+// Pedidos feitos logo no toque: o Safari pode recusar fora dele.
+function prepararNoToque() {
+  manterTelaLigada();
+  pedirModoLigacao();
+  if (volume > 100) prepararContextoAudio();
+}
+
 async function criarSala() {
   avisoInicio('');
+  iniciarRegistroSalvo();
   bloquearBotoes(true);
   papel = 'anfitriao';
-  manterTelaLigada(); // pedido logo no toque: o Safari pode recusar fora dele
+  prepararNoToque();
   if (!(await prepararMicrofone())) {
     liberarTela();
     bloquearBotoes(false);
@@ -699,11 +954,12 @@ async function entrarSala() {
     avisoInicio('Código inválido. O código tem 10 letras e números.');
     return;
   }
+  iniciarRegistroSalvo();
   bloquearBotoes(true);
   papel = 'convidado';
   codigo = digitado;
   jaChamou = false;
-  manterTelaLigada();
+  prepararNoToque();
   if (!(await prepararMicrofone())) {
     liberarTela();
     bloquearBotoes(false);
@@ -732,7 +988,10 @@ function encerrarTudo() {
   if (chamada) chamada.close();
   if (peer && !peer.destroyed) peer.destroy();
   if (streamLocal) streamLocal.getTracks().forEach((t) => t.stop());
+  desmontarAmplificador();
+  if (contextoAudio) contextoAudio.close().catch(() => {});
   liberarTela();
+  salvarRegistro();
 }
 
 function ligarTrava() {
@@ -799,7 +1058,7 @@ function iniciar() {
 
   $('ativarAudio').addEventListener('click', tocarAudio);
   $('entrarNovamente').addEventListener('click', () => {
-    if (!peer || peer.destroyed || peer.disconnected) {
+    if (!peer || peer.destroyed || !peer.open) {
       definirStatus(AVISO_SEM_INTERNET, 'alerta');
       return;
     }
@@ -821,18 +1080,19 @@ function iniciar() {
     trocarMicrofone(microfoneEscolhido);
   });
   $('reativar').addEventListener('click', () => trocarMicrofone(microfoneEscolhido || undefined));
-  $('enviarRegistro').addEventListener('click', async () => {
-    const registro = textoRegistro();
-    if (navigator.share) {
-      try {
-        await navigator.share({ text: registro });
-        return;
-      } catch (e) {
-        if (e.name === 'AbortError') return;
-      }
-    }
-    copiar(registro, 'Registro copiado. Cole o texto numa conversa do WhatsApp.');
+  $('enviarRegistro').addEventListener('click', () => {
+    compartilharRegistro(juntarRegistros(textoRegistro(), lerSalvo(CHAVE_REGISTRO_ANTERIOR)));
   });
+
+  // Registro da última conversa, para enviar depois de fechar a página.
+  $('enviarUltimoRegistro').hidden = !lerSalvo(CHAVE_REGISTRO);
+  $('enviarUltimoRegistro').addEventListener('click', () => {
+    compartilharRegistro(juntarRegistros(lerSalvo(CHAVE_REGISTRO), lerSalvo(CHAVE_REGISTRO_ANTERIOR)), true);
+  });
+
+  $('volumeMenos').addEventListener('click', () => mudarVolume(-1));
+  $('volumeMais').addEventListener('click', () => mudarVolume(1));
+  aplicarVolume();
 
   document.addEventListener('visibilitychange', () => {
     if (!peer) return;
@@ -843,14 +1103,19 @@ function iniciar() {
     registrar('Página visível novamente.');
     manterTelaLigada();
     if (audioRemoto.srcObject) tocarAudio();
+    if (contextoAudio && contextoAudio.state !== 'running') contextoAudio.resume().catch(() => {});
     setTimeout(conferirMicrofone, 1000);
+    reconectarServidorAgora();
+    setTimeout(reentrarSePerdeu, 2000);
   });
 
   document.addEventListener('pointerdown', () => {
     if (peer && (!wakeLock || wakeLock.released)) manterTelaLigada();
+    if (amplificador && contextoAudio && contextoAudio.state !== 'running') contextoAudio.resume().catch(() => {});
   });
 
   window.addEventListener('pagehide', () => {
+    salvarRegistro();
     if (peer && !peer.destroyed) peer.destroy();
   });
 }
